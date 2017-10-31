@@ -19,16 +19,20 @@
 //-------------------------------
 
 int main(int argc, char **argv) {
+
+	std::string input_filename;
     if (argc != 2) {
-        cout << "Usage: [gltf file]. Press Enter to exit" << endl;
-		getchar();
-        return 0;
-    }
+        cout << "No filename included in args." << endl;
+		cout << "Please provide a path to a .gltf file, or drag on onto this window from the explorer." << endl;
+		getline(cin, input_filename);
+	}
+	else {
+		input_filename = argv[1];
+	}
 
 	tinygltf::Scene scene;
 	tinygltf::TinyGLTFLoader loader;
 	std::string err;
-	std::string input_filename(argv[1]);
 	std::string ext = getFilePathExtension(input_filename);
 
 	bool ret = false;
