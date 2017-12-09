@@ -3,16 +3,41 @@ CUDA Rasterizer
 
 [CLICK ME FOR INSTRUCTION OF THIS PROJECT](./INSTRUCTION.md)
 
-**University of Pennsylvania, CIS 565: GPU Programming and Architecture, Project 4**
+![demogif](renders/demo.gif)
 
-* (TODO) YOUR NAME HERE
-* Tested on: (TODO) Windows 22, i7-2222 @ 2.22GHz 22GB, GTX 222 222MB (Moore 2222 Lab)
+**A rasterization pipeline build in Nvidia's CUDA parallel API. Features perspective-correct, bilinear filtered texture mapping, backface culling with stream compaction, supersampled antialiasing.**
+**University of Pennsylvania, CIS 565: GPU Programming and Architecture, Project 6**
 
-### (TODO: Your README)
+* Daniel Daley-Mongtomery
+* Tested on: MacBook Pro, OSX 10.12, i7 @ 2.3GHz, 16GB RAM, GT 750M 2048MB (Personal Machine)
 
-*DO NOT* leave the README to the last minute! It is a crucial part of the
-project, and we will not be able to grade you without a good README.
+##### Compose Vertices and Assemble primitives
+![](renders/reverseCull.PNG)
 
+##### Rasterize Primitives
+![](https://www.scratchapixel.com/images/upload/rasterization/raytracing-raster2.png?)
+
+
+| None        | Some           |
+| ------------- |:-------------:|
+| ![](renders/duckWithNoAntiAliasing.PNG) | ![duck](renders/DuckWithAntiAliasing.PNG)|
+
+##### Shade Fragments
+
+| None        | Some           |
+| ------------- |:-------------:|
+| ![](renders/NoPerspectiveCorrection.PNG) | ![](renders/PerspectiveCorrection.PNG)|
+
+| None        | Some           |
+| ------------- |:-------------:|
+| ![](renders/NoFilteringWith128x128Texture.PNG) | ![](renders/BilinearFilteringWith128x128Texture.PNG)|
+| ![](renders/NoFilteringWith512x512Texture.PNG) | ![](renders/BilinearFilteringWith512x512Texture.PNG)|
+
+##### Performance
+
+![](renders/RastPerf.png)
+
+<img src="renders/percent.png" width="500">
 
 ### Credits
 
