@@ -13,8 +13,8 @@
 #include <util/utilityCore.hpp>
 
 struct AABB {
-    glm::vec3 min;
-    glm::vec3 max;
+    glm::vec2 min;
+    glm::vec2 max;
 };
 
 /**
@@ -30,16 +30,14 @@ glm::vec3 multiplyMV(glm::mat4 m, glm::vec4 v) {
  * Finds the axis aligned bounding box for a given triangle.
  */
 __host__ __device__ static
-AABB getAABBForTriangle(const glm::vec3 tri[3]) {
+AABB getAABBForTriangle(const glm::vec3 tri[3], int width, int height) {
     AABB aabb;
-    aabb.min = glm::vec3(
-            min(min(tri[0].x, tri[1].x), tri[2].x),
-            min(min(tri[0].y, tri[1].y), tri[2].y),
-            min(min(tri[0].z, tri[1].z), tri[2].z));
-    aabb.max = glm::vec3(
-            max(max(tri[0].x, tri[1].x), tri[2].x),
-            max(max(tri[0].y, tri[1].y), tri[2].y),
-            max(max(tri[0].z, tri[1].z), tri[2].z));
+	aabb.min = glm::vec2(
+		max(min(min(min(tri[0].x, tri[1].x), tri[2].x), (float)width), 0.0f),
+		max(min(min(min(tri[0].y, tri[1].y), tri[2].y), (float)height), 0.0f));
+	aabb.max = glm::vec2(
+		max(min(max(max(tri[0].x, tri[1].x), tri[2].x), (float)width), 0.0f),
+		max(min(max(max(tri[0].y, tri[1].y), tri[2].y), (float)height), 0.0f));
     return aabb;
 }
 

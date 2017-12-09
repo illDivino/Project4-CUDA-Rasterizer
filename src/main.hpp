@@ -40,6 +40,10 @@ const char *attributeLocations[] = { "Position", "Tex" };
 GLuint pbo = (GLuint)NULL;
 GLuint displayImage;
 uchar4 *dptr;
+int iterations = -100;
+double cumulative = 0;
+
+
 
 GLFWwindow *window;
 

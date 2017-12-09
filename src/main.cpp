@@ -68,6 +68,7 @@ int main(int argc, char **argv) {
 }
 
 void mainLoop() {
+
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
         runCuda();
@@ -75,11 +76,12 @@ void mainLoop() {
         time_t seconds2 = time (NULL);
 
         if (seconds2 - seconds >= 1) {
-
+			cout << 1000.0 * (seconds2 - seconds) / fpstracker << std::endl;
             fps = fpstracker / (seconds2 - seconds);
             fpstracker = 0;
             seconds = seconds2;
         }
+
 
         string title = "CIS565 Rasterizer | " + utilityCore::convertIntToString((int)fps) + " FPS";
         glfwSetWindowTitle(window, title.c_str());
@@ -101,8 +103,8 @@ void mainLoop() {
 //---------RUNTIME STUFF---------
 //-------------------------------
 float scale = 1.0f;
-float x_trans = 0.0f, y_trans = 0.0f, z_trans = -10.0f;
-float x_angle = 0.0f, y_angle = 0.0f;
+float x_trans = -0.5f, y_trans = -2.0f, z_trans = -7.8f;
+float x_angle = 0.0f, y_angle = 3.14159 * 2.0 * -0.105f;
 void runCuda() {
     // Map OpenGL buffer object for writing from CUDA on a single GPU
     // No data is moved (Win & Linux). When mapped to CUDA, OpenGL should not use this buffer
@@ -113,6 +115,7 @@ void runCuda() {
 		-scale, scale, 1.0, 1000.0);
 
 	glm::mat4 V = glm::mat4(1.0f);
+	y_angle += (float)0.02;
 
 	glm::mat4 M =
 		glm::translate(glm::vec3(x_trans, y_trans, z_trans))
@@ -124,10 +127,13 @@ void runCuda() {
 	glm::mat4 MVP = P * MV;
 
     cudaGLMapBufferObject((void **)&dptr, pbo);
+
+	clock_t begin;
 	rasterize(dptr, MVP, MV, MV_normal);
     cudaGLUnmapBufferObject(pbo);
 
     frame++;
+	iterations++;
     fpstracker++;
 }
 

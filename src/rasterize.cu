@@ -18,11 +18,18 @@
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
+#include <thrust/execution_policy.h>
+#include <thrust/remove.h>
+#include <thrust/sort.h>
+#include <thrust/device_vector.h>
+
 #define BACKFACE_CULLING 1
 #define PERSP_CORRECT 1
-#define BILINEAR 0
-#define SAMPLES 2
+#define SORT_BY_AREA 1
+#define BILINEAR 1
+#define SAMPLES 1
 #define SAMPLE_WEIGHT (1.0f / (SAMPLES * SAMPLES))
+#define SAMPLE_JITTER (1.0f / SAMPLES)
 #pragma region Assumed
 namespace {
 
@@ -52,6 +59,7 @@ namespace {
 	struct Primitive {
 		PrimitiveType primitiveType = Triangle;	// C++ 11 init
 		VertexOut v[3];
+		bool cull;
 	};
 
 	struct Fragment {
@@ -93,6 +101,7 @@ static int height = 0;
 
 static int totalNumPrimitives = 0;
 static Primitive *dev_primitives = NULL;
+thrust::device_ptr<Primitive> dev_thrust_primitives;
 
 static Fragment *dev_fragmentBuffer = NULL;
 static glm::vec3 *dev_framebuffer = NULL;
@@ -165,14 +174,14 @@ void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer) {
 
 	if (x < w && y < h) {
 		Fragment f = fragmentBuffer[index];
-		if (f.eyeNormal == glm::vec3(0, 0, 0)) {
-			framebuffer[index] = f.eyeNormal;
+		if (f.eyeNormal == glm::vec3(0)) {
+			framebuffer[index] = glm::vec3(0);
 			return;
 		}
 
 		glm::vec3 lightDir(1, 1, 1);
 		glm::vec3 color;
-		if (f.diffuseTexture == NULL) color = glm::vec3(1, 1, 1);
+		if (false || f.diffuseTexture == NULL) color = glm::vec3(1, 1, 1);
 		else
 #if BILINEAR
 			color = sampleBilinear(f.UV, f.diffuseTexture, f.texWidth, f.texHeight);
@@ -641,6 +650,7 @@ void rasterizeSetBuffers(const tinygltf::Scene & scene) {
 	// 3. Malloc for dev_primitives
 	{
 		cudaMalloc(&dev_primitives, totalNumPrimitives * sizeof(Primitive));
+		dev_thrust_primitives = thrust::device_ptr<Primitive>(dev_primitives);
 	}
 
 
@@ -674,9 +684,10 @@ void _primitiveAssembly(int numIndices, int curPrimitiveBeginId, Primitive* dev_
 
 	if (iid < numIndices) {
 		int pid;	// id for cur primitives vector
-		pid = iid / (int)primitive.primitiveType;
-		dev_primitives[pid + curPrimitiveBeginId].v[iid % (int)primitive.primitiveType]
-			= primitive.dev_verticesOut[primitive.dev_indices[iid]];
+		pid = iid / (int)primitive.primitiveType + curPrimitiveBeginId;
+		VertexOut v = primitive.dev_verticesOut[primitive.dev_indices[iid]];
+		dev_primitives[pid].v[iid % (int)primitive.primitiveType] = v;
+		dev_primitives[pid].cull = v.vertexNormal[2] < 0;
 	}
 
 }
@@ -749,40 +760,47 @@ __global__ void generateFragments(int numPrimitives, Primitive* primitiveBuffer,
 	VertexOut p2 = p.v[2];
 	glm::vec3 triangle[3] = { glm::vec3(p0.vertexPerspPos), glm::vec3(p1.vertexPerspPos), glm::vec3(p2.vertexPerspPos) };
 
-#if BACKFACE_CULLING
-	if (glm::dot(p0.vertexNormal, glm::vec3(0, 0, -1)) >= 0) return;
-#endif
-	//get upper and lower triangle bounds
-	AABB triBounds = getAABBForTriangle(triangle);
-	triBounds.min = glm::max(triBounds.min, 0.0f);
-	triBounds.max.x = glm::min(triBounds.max.x, (float)width);
-	triBounds.max.y = glm::min(triBounds.max.y, (float)height);
+	//get upper and lower triangle bounds and restrict them to frustum
+	AABB triBounds = getAABBForTriangle(triangle, width, height);
 
-	//simple naive loop
+	//simple loop
 	for (int x = triBounds.min.x; x < triBounds.max.x; x++) {
 		for (int y = triBounds.min.y; y < triBounds.max.y; y++) {
 
+			int fragIndex = y*width + x;
+			
 			glm::vec3 barycentricCoord = calculateBarycentricCoordinate(triangle, glm::vec2(x, y)+sampleOffset);
 			//see if the given pixel is within the triangle's bounds from the current view
 			if (isBarycentricCoordInBounds(barycentricCoord)) {
 				int fragIndex = y*width + x;
+				if (fragIndex > width * height) return;
 				float depth = 1.0f / getZAtCoordinate(barycentricCoord, triangle);
 				atomicMin(&depthBuffer[fragIndex], (int)(depth * INT_MAX));
+				glm::vec3 eyeNormal = interpolateBarycentric(p0.vertexNormal, p1.vertexNormal, p2.vertexNormal, barycentricCoord);
 				if (depth * INT_MAX == depthBuffer[fragIndex]) {
+					Fragment f;
 #if PERSP_CORRECT
-					fragmentBuffer[fragIndex].UV = interpolatePerspective(p, barycentricCoord, depth);
+					f.UV = interpolatePerspective(p, barycentricCoord, depth);
 #else
-					fragmentBuffer[fragIndex].UV = interpolateBarycentric(p0.vertexUV, p1.vertexUV, p2.vertexUV, barycentricCoord);
+					f.UV = interpolateBarycentric(p0.vertexUV, p1.vertexUV, p2.vertexUV, barycentricCoord);
 #endif
-					fragmentBuffer[fragIndex].texWidth = p0.texWidth;
-					fragmentBuffer[fragIndex].texHeight = p0.texHeight;
-					fragmentBuffer[fragIndex].diffuseTexture = p0.diffuseTexture;
-					fragmentBuffer[fragIndex].eyeNormal = interpolateBarycentric(p0.vertexNormal, p1.vertexNormal, p2.vertexNormal, barycentricCoord);
+					f.texWidth = p0.texWidth;
+					f.texHeight = p0.texHeight;
+					f.diffuseTexture = p0.diffuseTexture;
+					f.eyeNormal = eyeNormal;
+					fragmentBuffer[fragIndex] = f;
 				}
 			}
 		}
 	}
 }
+
+//helper for remove-if
+struct toCull {
+	__host__ __device__ bool operator()(Primitive p) {
+		return p.cull;
+	}
+};
 
 //put it all together
 void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const glm::mat3 MV_normal) {
@@ -820,18 +838,27 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 	}
 	checkCUDAError("Vertex Processing and Primitive Assembly");
 
-	dim3 numBlocksForPrims((totalNumPrimitives + numThreadsPerBlock.x - 1) / numThreadsPerBlock.x);
+#if BACKFACE_CULLING
+	//remove if for culled primitives
+	Primitive* new_primitive_end = thrust::remove_if(thrust::device, dev_primitives, dev_primitives + totalNumPrimitives, toCull());//-- 2: cull those paths that don't need any more shading
+	int frontPrims = new_primitive_end - dev_primitives;
+#else
+	int frontPrims = totalNumPrimitives;
+#endif
+
+	dim3 numBlocksForPrims((frontPrims + numThreadsPerBlock.x - 1) / numThreadsPerBlock.x);
+
 	cudaMemset(dev_framebuffer, 0, width*height * sizeof(glm::vec3));
 
 	for (float i = 0; i < SAMPLES; i++) {
 		for (float j = 0; j < SAMPLES; j++) {
-			glm::vec2 sampleOffset = glm::vec2(i / SAMPLES, j / SAMPLES);
+			glm::vec2 sampleOffset = glm::vec2(i * SAMPLE_JITTER, j * SAMPLE_JITTER);
 
 			cudaMemset(dev_fragmentBuffer, 0, width * height * sizeof(Fragment));
 			initDepth << <blockCount2d, blockSize2d >> > (width, height, dev_depth);
 
 			// TODO: rasterize
-			generateFragments << <numBlocksForPrims, numThreadsPerBlock >> > (totalNumPrimitives, dev_primitives, width, height, dev_fragmentBuffer, dev_depth, sampleOffset);
+			generateFragments << <numBlocksForPrims, numThreadsPerBlock >> > (frontPrims, dev_primitives, width, height, dev_fragmentBuffer, dev_depth, sampleOffset);
 			checkCUDAError("rasterization problem");
 
 			// Copy depthbuffer colors into framebuffer
